@@ -20,10 +20,11 @@ import {
 	extractFrontMatter,
 	hasChildPagesOrDatabases,
 	mapNotionPropertyToFrontmatter,
+	createDatabaseLookups,
 } from './notion-api/api-helpers';
 import { convertBlocksToMarkdown, convertRichText } from './notion-api/block-converter';
-import { processDatabasePlaceholders, importDatabaseCore, replaceRelationValue } from './notion-api/database-helpers';
-import { DatabaseInfo, RelationPlaceholder, DatabaseProcessingContext, FetchAndImportPageParams, NOTION_VERSION, SyncedBlockRequest } from './notion-api/types';
+import { processDatabasePlaceholders, importDatabaseCore, replaceRelationValue, LinkedDatabaseError, LINKED_DATABASE_COMMENT } from './notion-api/database-helpers';
+import { DatabaseInfo, DatabaseLookups, RelationPlaceholder, DatabaseProcessingContext, FetchAndImportPageParams, NOTION_VERSION, SyncedBlockRequest } from './notion-api/types';
 import { downloadAttachment } from './notion-api/attachment-helpers';
 import { buildTree, collectItems, type NotionTreeNode } from './notion-api/discovery';
 
@@ -368,6 +369,7 @@ export class NotionAPIImporter extends FormatImporter {
 	private outputRootPath: string = '';
 	// Track all processed databases for relation resolution
 	private processedDatabases: Map<string, DatabaseInfo> = new Map();
+	private databaseLookups: DatabaseLookups = createDatabaseLookups();
 	// Track all relation placeholders that need to be replaced
 	private relationPlaceholders: RelationPlaceholder[] = [];
 	private relatedPageTitles: Map<string, string | null> = new Map();
@@ -871,6 +873,7 @@ export class NotionAPIImporter extends FormatImporter {
 			// Reset processed pages tracker
 			this.processedPages.clear();
 			this.processedDatabases.clear();
+			this.databaseLookups = createDatabaseLookups();
 			this.relationPlaceholders = [];
 			this.relatedPageTitles.clear();
 			this.finishedPages = 0;
@@ -1032,6 +1035,7 @@ export class NotionAPIImporter extends FormatImporter {
 					outputRootPath: this.outputRootPath,
 					formulaStrategy: this.formulaStrategy,
 					processedDatabases: this.processedDatabases,
+					databaseLookups: this.databaseLookups,
 					relationPlaceholders: this.relationPlaceholders,
 					onBaseFileWritten: path => this.lastBaseFilePath = path,
 					databasePropertyName: this.databasePropertyName,
@@ -1192,7 +1196,7 @@ export class NotionAPIImporter extends FormatImporter {
 			// Check if page has child pages or child databases (recursively check nested blocks)
 			// This will check not only top-level blocks, but also blocks nested in lists, toggles, etc.
 			// The blocksCache will be populated during this check
-			const hasChildren = await hasChildPagesOrDatabases(this.notionClient!, blocks, ctx, blocksCache);
+			const hasChildren = await hasChildPagesOrDatabases(this.notionClient!, blocks, ctx, this.databaseLookups, blocksCache);
 
 			// Discover all children first so remaining decreases monotonically.
 			this.pagesDiscovered(ctx, childPageIds(blocksCache));
@@ -1293,6 +1297,7 @@ export class NotionAPIImporter extends FormatImporter {
 					outputRootPath: this.outputRootPath,
 					formulaStrategy: this.formulaStrategy,
 					processedDatabases: this.processedDatabases,
+					databaseLookups: this.databaseLookups,
 					relationPlaceholders: this.relationPlaceholders,
 					onBaseFileWritten: path => this.lastBaseFilePath = path,
 					databasePropertyName: this.databasePropertyName, // Add database property name for child databases
@@ -1636,6 +1641,7 @@ export class NotionAPIImporter extends FormatImporter {
 				outputRootPath: this.outputRootPath,
 				formulaStrategy: this.formulaStrategy,
 				processedDatabases: this.processedDatabases,
+				databaseLookups: this.databaseLookups,
 				relationPlaceholders: this.relationPlaceholders,
 				onBaseFileWritten: path => this.lastBaseFilePath = path,
 				shouldPrefetchDatabaseBlocks: (page, parentPath, databaseTag) => this.shouldPrefetchDatabaseBlocks(page, parentPath, databaseTag),
@@ -1870,7 +1876,8 @@ export class NotionAPIImporter extends FormatImporter {
 							catch (error) {
 								// Failed to import (no access or error)
 								console.warn(`Failed to import synced child database ${databaseId}:`, error);
-								content = content.replace(dbPlaceholder, `**Database** _(no access)_`);
+								content = content.replace(dbPlaceholder, error instanceof LinkedDatabaseError
+									? LINKED_DATABASE_COMMENT : `**Database** _(no access)_`);
 								continue; // Skip to next database ID
 							}
 						}

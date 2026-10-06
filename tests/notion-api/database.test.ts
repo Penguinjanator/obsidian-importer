@@ -22,7 +22,7 @@ import * as nodePath from 'node:path';
 
 import { stringifyYaml } from 'obsidian';
 
-import { extractFrontMatter, extractPageTitle } from '../../src/formats/notion-api/api-helpers';
+import { createDatabaseLookups, extractFrontMatter, extractPageTitle } from '../../src/formats/notion-api/api-helpers';
 import { DATABASE_PAGE_PREFETCH, importDatabaseCore, importDatabasePages, processRelationProperties, replaceRelationValue, yamlScalar } from '../../src/formats/notion-api/database-helpers';
 import { ImportContext } from '../../src/import-context';
 import type { RelationPlaceholder } from '../../src/formats/notion-api/types';
@@ -63,6 +63,7 @@ test('reports a base as soon as it is written', async () => {
 		outputRootPath: 'Notion',
 		formulaStrategy: 'hybrid',
 		processedDatabases: new Map(),
+		databaseLookups: createDatabaseLookups(),
 		relationPlaceholders: [],
 		importPageCallback: async () => assert.fail('an empty database has no pages to import'),
 		onBaseFileWritten: path => written.push(path),

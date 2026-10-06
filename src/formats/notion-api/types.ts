@@ -7,7 +7,9 @@ export const NOTION_VERSION = '2025-09-03';
 import {
 	Client,
 	BlockObjectResponse,
+	DatabaseObjectResponse,
 	DataSourceObjectResponse,
+	GetDataSourceResponse,
 	PageObjectResponse,
 	Heading1BlockObjectResponse
 } from '@notionhq/client';
@@ -41,7 +43,9 @@ export interface DatabaseProcessingContext {
 	app: App;
 	outputRootPath: string;
 	formulaStrategy: FormulaImportStrategy;
+	/** Imported databases, under their database ID and their data-source ID. */
 	processedDatabases: Map<string, DatabaseInfo>;
+	databaseLookups: DatabaseLookups;
 	relationPlaceholders: RelationPlaceholder[];
 	importPageCallback: (
 		pageId: string,
@@ -60,6 +64,12 @@ export interface DatabaseProcessingContext {
 		databaseTag: string,
 	) => Promise<boolean> | boolean;
 	blocksCache?: Map<string, BlockObjectResponse[]>; // Cache of fetched blocks for recursive search
+}
+
+/** Database and data-source responses already fetched during this import, by ID. */
+export interface DatabaseLookups {
+	databases: Map<string, DatabaseObjectResponse>;
+	dataSources: Map<string, GetDataSourceResponse>;
 }
 
 /** What the converter has to say about a synced block's own note. */

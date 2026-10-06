@@ -178,6 +178,34 @@ test('an attachment URL answers a ranged GET', { skip }, async () => {
 	console.log(`   ${total} bytes learned from ${received}`);
 });
 
+/**
+ * Does a data source still name the database it belongs to?
+ *
+ * A database whose first data source belongs to another database is treated as
+ * a linked view and skipped, so that it cannot copy its owner's rows. If Notion
+ * stopped reporting the owner this way, ordinary databases would be skipped as
+ * linked, which is the failure worth being told about.
+ */
+test('a data source names the database that lists it', { skip }, async () => {
+	const search = await api('/search', { filter: { property: 'object', value: 'data_source' }, page_size: 10 });
+
+	if (search.results.length === 0) {
+		console.log('   no database among what this integration can see; nothing to ask');
+		return;
+	}
+
+	for (const found of search.results) {
+		const dataSource = await api(`/data_sources/${found.id}`);
+		assertShape(dataSource.parent, { database_id: 'string' }, 'data source parent');
+
+		const database = await api(`/databases/${dataSource.parent.database_id}`);
+		assert.equal(database.id, dataSource.parent.database_id, 'the owner is asked for by the ID the data source gives');
+		assert.ok(database.data_sources.some((listed: any) => listed.id === dataSource.id), 'the owner should list the data source');
+	}
+
+	console.log(`   ${search.results.length} data sources name their own database`);
+});
+
 test('a meeting notes block still points at its summary, notes and transcript', { skip }, async () => {
 	const response = await fetch('https://api.notion.com/v1/blocks/meeting_notes/query', {
 		method: 'POST',

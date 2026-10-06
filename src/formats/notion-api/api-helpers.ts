@@ -8,6 +8,7 @@ import {
 	BlockObjectResponse,
 	PageObjectResponse,
 	DatabaseObjectResponse,
+	GetDataSourceResponse,
 	RichTextItemResponse,
 	UserObjectResponse,
 	PartialBlockObjectResponse
@@ -33,7 +34,7 @@ const BLOCK_CONTEXT_LABELS: Record<BlockContext, () => string> = {
 };
 import { canConvertFormula, getNotionFormulaExpression } from './formula-converter';
 import { downloadAndFormatAttachment } from './attachment-helpers';
-import { BlockContext, NotionAttachment } from './types';
+import { BlockContext, DatabaseLookups, NotionAttachment } from './types';
 import { backOffBeforeRetry } from './utils';
 
 const MAX_RETRIES = 3;
@@ -239,18 +240,79 @@ export async function fetchAllBlocks(
 	return blocks;
 }
 
+export function createDatabaseLookups(): DatabaseLookups {
+	return { databases: new Map(), dataSources: new Map() };
+}
+
+async function remembered<T>(known: Map<string, T>, id: string, retrieve: () => Promise<T>): Promise<T> {
+	let value = known.get(id);
+	if (value === undefined) {
+		value = await retrieve();
+		known.set(id, value);
+	}
+	return value;
+}
+
+function sameNotionId(a: string, b: string): boolean {
+	const bare = (id: string) => id.replace(/-/g, '').toLowerCase();
+	return bare(a) === bare(b);
+}
+
+export function retrieveDataSource(
+	client: Client,
+	dataSourceId: string,
+	ctx: ImportContext,
+	lookups: DatabaseLookups
+): Promise<GetDataSourceResponse> {
+	return remembered(lookups.dataSources, dataSourceId, () => makeNotionRequest(
+		() => client.dataSources.retrieve({ data_source_id: dataSourceId }),
+		ctx
+	));
+}
+
+/** The database a data source belongs to, which both of its parent shapes carry. */
+export function dataSourceOwnerId(dataSource: GetDataSourceResponse): string | undefined {
+	return 'parent' in dataSource ? dataSource.parent?.database_id : undefined;
+}
+
+/**
+ * The data source a database owns, or null for a linked view. Notion returns a
+ * linked view with no data sources. One that named another database's source
+ * would copy that database's rows under the view, so ownership is checked too.
+ */
+export async function retrieveOwnedDataSource(
+	client: Client,
+	databaseId: string,
+	ctx: ImportContext,
+	lookups: DatabaseLookups
+): Promise<{ database: DatabaseObjectResponse, dataSource: GetDataSourceResponse } | null> {
+	const database = await remembered(lookups.databases, databaseId, () => makeNotionRequest(
+		() => client.databases.retrieve({ database_id: databaseId }) as Promise<DatabaseObjectResponse>,
+		ctx
+	));
+	if (!database.data_sources || database.data_sources.length === 0) return null;
+
+	const dataSource = await retrieveDataSource(client, database.data_sources[0].id, ctx, lookups);
+	const ownerId = dataSourceOwnerId(dataSource);
+	if (ownerId && !sameNotionId(ownerId, databaseId)) return null;
+
+	return { database, dataSource };
+}
+
 /**
  * Recursively check if a page has any child pages or databases
  * This includes checking nested blocks (e.g., pages inside toggles, lists, etc.)
  * @param client - Notion client
  * @param blocks - Blocks to check
  * @param ctx - Import context
+ * @param lookups - Database responses, shared with the database import
  * @param blocksCache - Optional cache to store fetched blocks and avoid duplicate API calls
  */
 export async function hasChildPagesOrDatabases(
 	client: Client,
 	blocks: BlockObjectResponse[],
 	ctx: ImportContext,
+	lookups: DatabaseLookups,
 	blocksCache?: Map<string, BlockObjectResponse[]>
 ): Promise<boolean> {
 	for (const block of blocks) {
@@ -263,15 +325,8 @@ export async function hasChildPagesOrDatabases(
 		// But we need to verify it's not a linked database (which we skip)
 		if (block.type === 'child_database') {
 			try {
-				// Try to retrieve the database to check if it's a linked database
-				const database = await makeNotionRequest(
-					() => client.databases.retrieve({ database_id: block.id }) as Promise<DatabaseObjectResponse>,
-					ctx
-				);
-
-				// Check if this is a linked database (no data sources)
 				// Linked databases are not supported and will be skipped during import
-				if (database.data_sources && database.data_sources.length > 0) {
+				if (await retrieveOwnedDataSource(client, block.id, ctx, lookups)) {
 					// This is a real database, not a linked one
 					return true;
 				}
@@ -291,7 +346,7 @@ export async function hasChildPagesOrDatabases(
 				const children = await getBlockChildren(block.id, client, ctx, blocksCache);
 
 				if (children.length > 0) {
-					const hasChildrenInNested = await hasChildPagesOrDatabases(client, children, ctx, blocksCache);
+					const hasChildrenInNested = await hasChildPagesOrDatabases(client, children, ctx, lookups, blocksCache);
 					if (hasChildrenInNested) {
 						return true;
 					}

@@ -7,6 +7,7 @@ import {
 	Client,
 	BlockObjectResponse,
 	DatabaseObjectResponse,
+	GetDataSourceResponse,
 	PageObjectResponse,
 	PartialPageObjectResponse
 } from '@notionhq/client';
@@ -15,7 +16,13 @@ import { ImportContext } from '../../import-context';
 import { sanitizeFileName, getUniqueFilePath, updatePropertyTypes } from '../../util';
 import { i18n } from '../../i18n';
 import { parseFilePath } from '../../filesystem';
-import { fetchAllBlocks, makeNotionRequest } from './api-helpers';
+import {
+	dataSourceOwnerId,
+	fetchAllBlocks,
+	makeNotionRequest,
+	retrieveDataSource,
+	retrieveOwnedDataSource
+} from './api-helpers';
 import { canConvertFormula, convertNotionFormulaToObsidian, getNotionFormulaExpression } from './formula-converter';
 import {
 	DatabaseInfo,
@@ -97,6 +104,14 @@ export async function importDatabasePages(
 	}
 }
 
+export const LINKED_DATABASE_COMMENT = '<!-- Linked database (not supported by Notion API) -->';
+
+export class LinkedDatabaseError extends Error {
+	constructor() {
+		super('Linked database (not supported by Notion API)');
+	}
+}
+
 /**
  * Convert a child_database block to Markdown
  * This creates a reference to a .base file and sets up the database structure
@@ -135,16 +150,9 @@ export async function convertChildDatabase(
 	catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 
-		// Check if this is a linked database error
-		// According to Notion's official documentation, linked databases are not supported by the API
-		// They will have empty data_sources array and should be skipped
-		// Note: Linked databases always have "Untitled" as their title
+		// Linked databases are not supported by the API
 		// See: https://developers.notion.com/docs/working-with-databases#linked-databases
-		if (errorMsg.includes('Linked database') ||
-			errorMsg.includes('not supported by Notion API')) {
-			console.warn(`Skipping linked database (block ID: ${databaseId})`);
-			return `<!-- Linked database (not supported by Notion API) -->`;
-		}
+		if (error instanceof LinkedDatabaseError) return LINKED_DATABASE_COMMENT;
 
 		// Check for other permission/access errors that might indicate a linked view
 		const isLinkedViewError = (
@@ -214,6 +222,16 @@ function extractDatabaseTitle(database: DatabaseObjectResponse): string {
 	return 'Untitled Database';
 }
 
+function alreadyImported(database: DatabaseInfo): DatabaseImportResult {
+	return {
+		sanitizedTitle: database.title,
+		baseFilePath: database.baseFilePath,
+		databasePages: [],
+		dataSourceId: database.dataSourceId,
+		dataSourceProperties: database.properties,
+	};
+}
+
 /**
  * Core database import logic (shared between convertChildDatabase and importUnimportedDatabase)
  * This function handles the actual database import process without the wrapper logic
@@ -235,10 +253,15 @@ export async function importDatabaseCore(
 		shouldPrefetchDatabaseBlocks,
 		onPagesDiscovered,
 		onBaseFileWritten,
-		databasePropertyName = 'base'
+		databasePropertyName = 'base',
+		databaseLookups
 	} = context;
 
+	const knownDatabase = processedDatabases.get(databaseId);
+	if (knownDatabase) return alreadyImported(knownDatabase);
+
 	let dataSourceId: string;
+	let dataSource: GetDataSourceResponse;
 	let sanitizedTitle: string = 'Untitled Database'; // Default value
 
 	if (isDataSourceId) {
@@ -248,38 +271,36 @@ export async function importDatabaseCore(
 
 		// We'll get the title from dataSources.retrieve() below
 		ctx.status(i18n.importer.notionApi.statusProcessingDataSource({ id: dataSourceId }));
+		dataSource = await retrieveDataSource(client, dataSourceId, ctx, databaseLookups);
 	}
 	else {
 		// Traditional flow: get database first, then extract data_source_id
-		const database = await makeNotionRequest(
-			() => client.databases.retrieve({ database_id: databaseId }) as Promise<DatabaseObjectResponse>,
-			ctx
-		);
+		// If the data source cannot be retrieved, no folder is created
+		const owned = await retrieveOwnedDataSource(client, databaseId, ctx, databaseLookups);
+
+		// Linked databases are not supported by the API. Importing one would
+		// write the rows of the database it shows a second time, under the view.
+		if (!owned) {
+			console.warn(`Skipping linked database (ID: ${databaseId})`);
+			throw new LinkedDatabaseError();
+		}
 
 		// Extract database title
-		const databaseTitle = extractDatabaseTitle(database);
+		const databaseTitle = extractDatabaseTitle(owned.database);
 		sanitizedTitle = sanitizeFileName(databaseTitle || 'Untitled Database');
 
 		ctx.status(i18n.importer.notionApi.statusProcessingDatabase({ title: sanitizedTitle }));
 
-		// Check if this is a linked database (no data sources)
-		// According to Notion's official documentation, linked databases are not supported by the API
-		// and will have an empty data_sources array
-		// Note: Linked databases always have "Untitled" as their title
-		if (!database.data_sources || database.data_sources.length === 0) {
-			const errorMsg = 'Linked database (not supported by Notion API)';
-			console.warn(`Skipping linked database (ID: ${databaseId}): ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		dataSourceId = database.data_sources[0].id;
+		dataSource = owned.dataSource;
+		dataSourceId = owned.database.data_sources[0].id;
 	}
 
-	// Try to retrieve data source - if this fails, don't create folder
-	const dataSource = await makeNotionRequest(
-		() => client.dataSources.retrieve({ data_source_id: dataSourceId }),
-		ctx
-	);
+	// The same rows can be asked for by database ID and by data-source ID.
+	const knownSource = processedDatabases.get(dataSourceId);
+	if (knownSource) {
+		processedDatabases.set(databaseId, knownSource);
+		return alreadyImported(knownSource);
+	}
 
 	// Get data source properties
 	let dataSourceProperties: Record<string, any> = dataSource.properties || {};
@@ -360,6 +381,20 @@ export async function importDatabaseCore(
 	});
 	onBaseFileWritten?.(baseFilePath);
 
+	// Register before walking rows: a row can hold this database again, and
+	// must find it rather than start a second import of the same rows.
+	const databaseInfo: DatabaseInfo = {
+		id: databaseId,
+		title: sanitizedTitle,
+		folderPath: databaseFolderPath,
+		baseFilePath: baseFilePath,
+		properties: dataSourceProperties,
+		dataSourceId: dataSourceId,
+	};
+	for (const id of [databaseId, dataSourceId, dataSourceOwnerId(dataSource)]) {
+		if (id) processedDatabases.set(id, databaseInfo);
+	}
+
 	// Extract .base file name for database tag (e.g., "Database name.base")
 	const { basename: baseFileName } = parseFilePath(baseFilePath);
 	const baseFileTag = `${baseFileName}.base`;
@@ -394,17 +429,6 @@ export async function importDatabaseCore(
 	const propertyTypes = extractPropertyTypesForTypesJson(dataSourceProperties, databasePages);
 	updatePropertyTypes(context.app, propertyTypes);
 	
-	// Record database information
-	const databaseInfo: DatabaseInfo = {
-		id: databaseId,
-		title: sanitizedTitle,
-		folderPath: databaseFolderPath,
-		baseFilePath: baseFilePath,
-		properties: dataSourceProperties,
-		dataSourceId: dataSourceId,
-	};
-	processedDatabases.set(databaseId, databaseInfo);
-
 	// Process relation properties
 	await processRelationProperties(
 		databasePages,
