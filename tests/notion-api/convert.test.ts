@@ -112,6 +112,17 @@ test('writes one line between blocks when asked to', async () => {
 	assert.doesNotMatch(tight, /\n\n\n/);
 });
 
+test('ends a toggle heading\'s list before the block that follows its section', async () => {
+	const fixture = pages.find(page => page.name === 'toggle-headings-page.json');
+	assert.ok(fixture, 'expected toggle-headings-page.json in tests/notion-api');
+	const page = JSON.parse(nodeFs.readFileSync(fixture.path, 'utf8')) as PageFixture;
+	const blocks = page.blocks[page.pageId].results;
+
+	const tight = await convertBlocksToMarkdown(blocks as never, context(page, { singleLineBreaks: true }));
+
+	assert.match(tight, /^## Tasks\nThings to do this week\.\n- Write the report\n- Send it\n\nA paragraph after the section\.\n# Outer section\n/);
+});
+
 test('hands a synced block\'s own note to the importer to place and write', async () => {
 	const vault = new MemoryVault();
 	await vault.createFolder('Notion');

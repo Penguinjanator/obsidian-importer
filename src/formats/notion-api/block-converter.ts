@@ -99,10 +99,9 @@ function isEmptyParagraph(block: BlockObjectResponse | null | undefined): boolea
 }
 
 /**
- * Convert a block to Obsidian foldable callout
- * Used for both toggle blocks and toggleable headings
+ * Convert a toggle block to Obsidian foldable callout
  * 
- * @param title - The title text for the callout (can include heading markers like # ##)
+ * @param title - The title text for the callout
  * @param block - The parent block (must have children)
  * @param context - Block conversion context
  * @param errorContext - Context string for error messages
@@ -237,11 +236,26 @@ export async function convertBlocksToMarkdown(
 	context: BlockConversionContext
 ): Promise<string> {
 	const lines: string[] = [];
+	blocks = [...blocks];
 	
 	for (let i = 0; i < blocks.length; i++) {
 		if (await context.ctx.shouldStop()) break;
 		
 		const block = blocks[i];
+		
+		// Obsidian folds whatever follows a heading, so a toggleable heading's
+		// children continue the document as its siblings
+		if (isHeading(block) && block.has_children) {
+			const children = await processBlockChildren({
+				block,
+				client: context.client,
+				ctx: context.ctx,
+				blocksCache: context.blocksCache,
+				processor: (found) => found,
+				errorContext: 'toggleable heading'
+			});
+			if (children) blocks.splice(i + 1, 0, ...children);
+		}
 		
 		// Reset list counters for deeper levels when we encounter a non-numbered-list block
 		// This ensures proper numbering when switching between list types or exiting nested lists
@@ -311,7 +325,7 @@ export async function convertBlockToMarkdown(
 		case 'heading_1':
 		case 'heading_2':
 		case 'heading_3':
-			markdown = await convertHeading(block, context);
+			markdown = convertHeading(block, context);
 			break;
 		
 		case 'bulleted_list_item':
@@ -608,11 +622,14 @@ export async function convertParagraph(block: BlockObjectResponse, context?: Blo
 	return markdown;
 }
 
+function isHeading(block: BlockObjectResponse): boolean {
+	return block.type === 'heading_1' || block.type === 'heading_2' || block.type === 'heading_3';
+}
+
 /**
  * Convert heading block to Markdown
- * Special handling: If heading is toggleable (is_toggleable = true), convert to Obsidian callout
  */
-export async function convertHeading(block: BlockObjectResponse, context: BlockConversionContext): Promise<string> {
+export function convertHeading(block: BlockObjectResponse, context: BlockConversionContext): string {
 	// Get indent level if heading is nested in a list
 	const indentLevel = context?.indentLevel || 0;
 	const indent = '    '.repeat(indentLevel); // 4 spaces per indent level
@@ -636,21 +653,8 @@ export async function convertHeading(block: BlockObjectResponse, context: BlockC
 		return '';
 	}
 	
-	const isToggleable = headingData.is_toggleable || false;
-	
 	const headingText = convertRichText(headingData.rich_text, context);
 	
-	// If heading is toggleable and has children, convert to callout format
-	if (isToggleable && block.has_children) {
-		return await convertToFoldableCallout(
-			headingPrefix + headingText,
-			block,
-			context,
-			'toggleable heading'
-		);
-	}
-	
-	// Regular heading (not toggleable or no children)
 	return indent + headingPrefix + headingText;
 }
 
