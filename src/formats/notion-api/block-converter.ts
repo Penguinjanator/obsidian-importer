@@ -316,7 +316,6 @@ export async function convertBlockToMarkdown(
 	const type = block.type;
 	let markdown = '';
 
-	// The Notion SDK does not yet type meeting_notes blocks.
 	switch (type) {
 		case 'paragraph':
 			markdown = await convertParagraph(block, context);
@@ -503,7 +502,6 @@ export async function convertBlockToMarkdown(
 		}
 		
 		default: {
-			// The SDK does not yet include meeting_notes in its block union.
 			const meetingNotes = asMeetingNotes(block);
 			if (meetingNotes) {
 				markdown = await convertMeetingNotes(block.id, meetingNotes, context);
@@ -540,11 +538,11 @@ const MEETING_NOTES_SECTIONS: MeetingNotesSection[] = [
 	{ key: 'transcript_block_id', heading: 'Transcript', label: () => i18n.importer.notionApi.sectionTranscript() },
 ];
 
+// The block is `transcription` until API version 2026-03-11 and `meeting_notes` from then on.
 function asMeetingNotes(block: BlockObjectResponse): MeetingNotesBlock | null {
-	if ((block.type as string) !== 'meeting_notes') return null;
-
-	const data = (block as unknown as Record<string, unknown>).meeting_notes;
-	return typeof data === 'object' && data !== null ? data : null;
+	if (block.type === 'transcription') return block.transcription;
+	if (block.type === 'meeting_notes') return block.meeting_notes;
+	return null;
 }
 
 async function convertMeetingNotes(

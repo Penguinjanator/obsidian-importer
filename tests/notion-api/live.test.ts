@@ -235,10 +235,10 @@ test('a meeting notes block still points at its summary, notes and transcript', 
 
 	const [block] = results;
 	assertShape(block, { object: 'string', id: 'string', type: 'string' }, 'meeting notes block');
-	assert.equal(block.type, 'meeting_notes', 'the block type the converter switches on');
+	assert.ok(['transcription', 'meeting_notes'].includes(block.type), `the converter does not know a ${block.type} block`);
 
-	const meetingNotes = block.meeting_notes;
-	assertShape(meetingNotes, { status: 'string', children: 'object' }, 'meeting_notes');
+	const meetingNotes = block[block.type];
+	assertShape(meetingNotes, { status: 'string', children: 'object' }, block.type);
 
 	const { summary_block_id, notes_block_id, transcript_block_id } = meetingNotes.children;
 	for (const [name, id] of Object.entries({ summary_block_id, notes_block_id, transcript_block_id })) {

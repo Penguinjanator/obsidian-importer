@@ -1,5 +1,5 @@
 {
-	"_comment": "Hand-written from Notion's documented meeting_notes shape; IDs and content are synthetic.",
+	"_comment": "Hand-written from Notion's documented shape for AI meeting notes as GET /v1/blocks/{id}/children returns them; IDs and content are synthetic. The block is `transcription` in API version 2025-09-03, which the importer asks for, and `meeting_notes` from 2026-03-11, so the first block uses the old name and the others the new one.",
 	"pageId": "30000000-0000-4000-8000-000000000001",
 	"blocks": {
 		"30000000-0000-4000-8000-000000000001": {
@@ -8,10 +8,10 @@
 				{
 					"object": "block",
 					"id": "30000000-0000-4000-8000-000000000010",
-					"type": "meeting_notes",
+					"type": "transcription",
 					"has_children": true,
 					"archived": false,
-					"meeting_notes": {
+					"transcription": {
 						"status": "notes_ready",
 						"title": [
 							{
