@@ -325,6 +325,7 @@ export async function convertBlockToMarkdown(
 		case 'heading_1':
 		case 'heading_2':
 		case 'heading_3':
+		case 'heading_4':
 			markdown = convertHeading(block, context);
 			break;
 		
@@ -623,7 +624,7 @@ export async function convertParagraph(block: BlockObjectResponse, context?: Blo
 }
 
 function isHeading(block: BlockObjectResponse): boolean {
-	return block.type === 'heading_1' || block.type === 'heading_2' || block.type === 'heading_3';
+	return block.type === 'heading_1' || block.type === 'heading_2' || block.type === 'heading_3' || block.type === 'heading_4';
 }
 
 /**
@@ -648,6 +649,10 @@ export function convertHeading(block: BlockObjectResponse, context: BlockConvers
 	else if (block.type === 'heading_3') {
 		headingPrefix = '### ';
 		headingData = block.heading_3;
+	}
+	else if (block.type === 'heading_4') {
+		headingPrefix = '#### ';
+		headingData = block.heading_4;
 	}
 	else {
 		return '';

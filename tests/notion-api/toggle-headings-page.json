@@ -1,5 +1,5 @@
 {
-	"_comment": "Hand-written to the shape of GET /v1/blocks/{id}/children (https://developers.notion.com/reference/get-block-children), keyed by block id as in example-page.json. A toggle heading is a heading block with is_toggleable set, and the section folded under it comes back as its children. Covers a section ending in a list before the next block, a toggle heading inside another, and one with nothing under it.",
+	"_comment": "Hand-written to the shape of GET /v1/blocks/{id}/children (https://developers.notion.com/reference/get-block-children), keyed by block id as in example-page.json. A toggle heading is a heading block with is_toggleable set, and the section folded under it comes back as its children. Covers a section ending in a list before the next block, a toggle heading inside another, one with nothing under it, and a fourth-level heading, which the API returns as heading_4.",
 	"pageId": "10000000-0000-4000-8000-000000000003",
 	"blocks": {
 		"10000000-0000-4000-8000-000000000003": {
@@ -119,6 +119,36 @@
 									"color": "default"
 								},
 								"plain_text": "Nothing folded",
+								"href": null
+							}
+						],
+						"color": "default",
+						"is_toggleable": true
+					}
+				},
+				{
+					"object": "block",
+					"id": "30000000-0000-4000-8000-000000000011",
+					"type": "heading_4",
+					"has_children": true,
+					"archived": false,
+					"heading_4": {
+						"rich_text": [
+							{
+								"type": "text",
+								"text": {
+									"content": "Fourth level",
+									"link": null
+								},
+								"annotations": {
+									"bold": false,
+									"italic": false,
+									"strikethrough": false,
+									"underline": false,
+									"code": false,
+									"color": "default"
+								},
+								"plain_text": "Fourth level",
 								"href": null
 							}
 						],
@@ -316,6 +346,42 @@
 									"color": "default"
 								},
 								"plain_text": "Inside the inner section.",
+								"href": null
+							}
+						],
+						"color": "default"
+					}
+				}
+			]
+		},
+		"30000000-0000-4000-8000-000000000011": {
+			"object": "list",
+			"has_more": false,
+			"next_cursor": null,
+			"results": [
+				{
+					"object": "block",
+					"id": "30000000-0000-4000-8000-000000000012",
+					"type": "paragraph",
+					"has_children": false,
+					"archived": false,
+					"paragraph": {
+						"rich_text": [
+							{
+								"type": "text",
+								"text": {
+									"content": "Under the fourth level.",
+									"link": null
+								},
+								"annotations": {
+									"bold": false,
+									"italic": false,
+									"strikethrough": false,
+									"underline": false,
+									"code": false,
+									"color": "default"
+								},
+								"plain_text": "Under the fourth level.",
 								"href": null
 							}
 						],

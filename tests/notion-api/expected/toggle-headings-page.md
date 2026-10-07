@@ -16,3 +16,7 @@ Inside the outer section.
 Inside the inner section.
 
 ### Nothing folded
+
+#### Fourth level
+
+Under the fourth level.
